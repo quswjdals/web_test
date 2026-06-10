@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>아이템 상점 기록 대시보드</title>
+
+<style>
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #111827;
+  color: #f9fafb;
+}
+
+header {
+  padding: 32px;
+  background: #1f2937;
+  text-align: center;
+}
+
+main {
+  width: 90%;
+  max-width: 1100px;
+  margin: 30px auto;
+}
+
+.card {
+  background: #1f2937;
+  padding: 24px;
+  border-radius: 16px;
+  margin-bottom: 24px;
+}
+
+.hint {
+  color: #9ca3af;
+  font-size: 14px;
+}
+
+select, input, textarea, button {
+  width: 100%;
+  padding: 12px;
+  border-radius: 10px;
+  border: none;
+  font-size: 15px;
+  margin-top: 8px;
+}
+
+select, input, textarea {
+  background: #374151;
+  color: white;
+}
+
+textarea {
+  height: 100px;
+  resize: vertical;
+}
+
+button {
+  background: #3b82f6;
+  color: white;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+button:hover {
+  background: #2563eb;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 15px;
+  margin-top: 20px;
+}
+
+.summary div {
+  background: #111827;
+  padding: 20px;
+  border-radius: 14px;
+  text-align: center;
+}
+
+.summary strong {
+  display: block;
+  font-size: 28px;
+  color: #60a5fa;
+}
+
+.summary span {
+  color: #d1d5db;
+}
+
+canvas {
+  width: 100%;
+  background: #111827;
+  border-radius: 12px;
+  padding: 10px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  padding: 12px;
+  border-bottom: 1px solid #374151;
+  text-align: center;
+}
+
+th {
+  color: #93c5fd;
+}
+
+.comment {
+  background: #111827;
+  margin-top: 15px;
+  padding: 15px;
+  border-radius: 12px;
+}
+
+.comment strong {
+  color: #93c5fd;
+}
+
+.comment small {
+  color: #9ca3af;
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <h1>아이템 상점 기록 대시보드</h1>
+  <p>CSV 파일을 업로드해서 아이템 시세와 골드화 수량을 확인하세요.</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>데이터 업로드</h2>
+    <input type="file" id="fileInput" accept=".csv">
+    <p class="hint">CSV 형식: date,item,price,quantity,player</p>
+  </section>
+
+  <section class="card">
+    <h2>아이템 선택</h2>
+    <select id="itemSelect">
+      <option value="">데이터를 먼저 업로드하세요</option>
+    </select>
+
+    <div class="summary">
+      <div>
+        <strong id="avgPrice">0</strong>
+        <span>평균 시세</span>
+      </div>
+      <div>
+        <strong id="totalQuantity">0</strong>
+        <span>총 골드화 수량</span>
+      </div>
+      <div>
+        <strong id="totalGold">0</strong>
+        <span>총 골드 가치</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>시세 변동 그래프</h2>
+    <canvas id="priceChart" width="900" height="350"></canvas>
+  </section>
+
+  <section class="card">
+    <h2>시세별 골드화 수량</h2>
+    <canvas id="quantityChart" width="900" height="350"></canvas>
+  </section>
+
+  <section class="card">
+    <h2>거래 기록</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>날짜</th>
+          <th>아이템</th>
+          <th>시세</th>
+          <th>수량</th>
+          <th>플레이어</th>
+        </tr>
+      </thead>
+      <tbody id="recordTable"></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>플레이어 의견</h2>
+    <input type="text" id="commentName" placeholder="플레이어 이름">
+    <textarea id="commentText" placeholder="의견을 입력하세요"></textarea>
+    <button id="addCommentBtn">의견 등록</button>
+
+    <div id="commentList"></div>
+  </section>
+</main>
+
+<script>
+let shopData = [];
+
+const fileInput = document.getElementById("fileInput");
+const itemSelect = document.getElementById("itemSelect");
+const recordTable = document.getElementById("recordTable");
+
+const avgPrice = document.getElementById("avgPrice");
+const totalQuantity = document.getElementById("totalQuantity");
+const totalGold = document.getElementById("totalGold");
+
+const priceCanvas = document.getElementById("priceChart");
+const quantityCanvas = document.getElementById("quantityChart");
+
+const commentName = document.getElementById("commentName");
+const commentText = document.getElementById("commentText");
+const addCommentBtn = document.getElementById("addCommentBtn");
+const commentList = document.getElementById("commentList");
+
+fileInput.addEventListener("change", handleFileUpload);
+itemSelect.addEventListener("change", updateDashboard);
+addCommentBtn.addEventListener("click", addComment);
+
+loadComments();
+
+function handleFileUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+
+  reader.onload = function(e) {
+    shopData = parseCSV(e.target.result);
+    setItemOptions();
+    updateDashboard();
+  };
+
+  reader.readAsText(file, "UTF-8");
+}
+
+function parseCSV(text) {
+  const lines = text.trim().split("\n");
+  const headers = lines[0].split(",").map(h => h.trim());
+
+  return lines.slice(1).map(line => {
+    const values = line.split(",").map(v => v.trim());
+    const row = {};
+
+    headers.forEach((header, index) => {
+      row[header] = values[index];
+    });
+
+    row.price = Number(row.price);
+    row.quantity = Number(row.quantity);
+
+    return row;
+  });
+}
+
+function setItemOptions() {
+  const items = [...new Set(shopData.map(row => row.item))];
+
+  itemSelect.innerHTML = "";
+
+  items.forEach(item => {
+    const option = document.createElement("option");
+    option.value = item;
+    option.textContent = item;
+    itemSelect.appendChild(option);
+  });
+}
+
+function updateDashboard() {
+  const selectedItem = itemSelect.value;
+  const filtered = shopData.filter(row => row.item === selectedItem);
+
+  updateSummary(filtered);
+  updateTable(filtered);
+  drawLineChart(priceCanvas, filtered);
+  drawBarChart(quantityCanvas, filtered);
+}
+
+function updateSummary(data) {
+  if (data.length === 0) return;
+
+  const priceSum = data.reduce((sum, row) => sum + row.price, 0);
+  const quantitySum = data.reduce((sum, row) => sum + row.quantity, 0);
+  const goldSum = data.reduce((sum, row) => sum + row.price * row.quantity, 0);
+
+  avgPrice.textContent = Math.round(priceSum / data.length).toLocaleString();
+  totalQuantity.textContent = quantitySum.toLocaleString();
+  totalGold.textContent = goldSum.toLocaleString();
+}
+
+function updateTable(data) {
+  recordTable.innerHTML = "";
+
+  data.forEach(row => {
+    const tr = document.createElement("tr");
+
+    tr.innerHTML = `
+      <td>${row.date}</td>
+      <td>${row.item}</td>
+      <td>${row.price.toLocaleString()}</td>
+      <td>${row.quantity.toLocaleString()}</td>
+      <td>${row.player}</td>
+    `;
+
+    recordTable.appendChild(tr);
+  });
+}
+
+function drawLineChart(canvas, data) {
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (data.length === 0) return;
+
+  const padding = 55;
+  const prices = data.map(row => row.price);
+  const maxPrice = Math.max(...prices);
+  const minPrice = Math.min(...prices);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "18px Arial";
+  ctx.fillText("시세 변동", padding, 30);
+
+  ctx.strokeStyle = "#374151";
+  ctx.beginPath();
+  ctx.moveTo(padding, padding);
+  ctx.lineTo(padding, canvas.height - padding);
+  ctx.lineTo(canvas.width - padding, canvas.height - padding);
+  ctx.stroke();
+
+  ctx.strokeStyle = "#60a5fa";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+
+  data.forEach((row, index) => {
+    const x = padding + index * ((canvas.width - padding * 2) / Math.max(data.length - 1, 1));
+    const y = canvas.height - padding - ((row.price - minPrice) / Math.max(maxPrice - minPrice, 1)) * (canvas.height - padding * 2);
+
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+
+  ctx.stroke();
+
+  data.forEach((row, index) => {
+    const x = padding + index * ((canvas.width - padding * 2) / Math.max(data.length - 1, 1));
+    const y = canvas.height - padding - ((row.price - minPrice) / Math.max(maxPrice - minPrice, 1)) * (canvas.height - padding * 2);
+
+    ctx.fillStyle = "#93c5fd";
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "12px Arial";
+    ctx.fillText(row.price.toLocaleString(), x - 18, y - 10);
+  });
+}
+
+function drawBarChart(canvas, data) {
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  if (data.length === 0) return;
+
+  const grouped = {};
+
+  data.forEach(row => {
+    if (!grouped[row.price]) grouped[row.price] = 0;
+    grouped[row.price] += row.quantity;
+  });
+
+  const entries = Object.entries(grouped);
+  const maxQuantity = Math.max(...entries.map(entry => entry[1]));
+
+  const padding = 55;
+  const barWidth = Math.max(20, (canvas.width - padding * 2) / entries.length - 10);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "18px Arial";
+  ctx.fillText("시세별 골드화 수량", padding, 30);
+
+  entries.forEach(([price, quantity], index) => {
+    const x = padding + index * (barWidth + 10);
+    const barHeight = (quantity / maxQuantity) * (canvas.height - padding * 2);
+    const y = canvas.height - padding - barHeight;
+
+    ctx.fillStyle = "#34d399";
+    ctx.fillRect(x, y, barWidth, barHeight);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "12px Arial";
+    ctx.fillText(quantity, x + 5, y - 8);
+    ctx.fillText(price, x, canvas.height - 20);
+  });
+}
+
+function addComment() {
+  const name = commentName.value.trim();
+  const text = commentText.value.trim();
+
+  if (!name || !text) {
+    alert("플레이어 이름과 의견을 모두 입력하세요.");
+    return;
+  }
+
+  const comments = JSON.parse(localStorage.getItem("itemShopComments")) || [];
+
+  comments.unshift({
+    name: name,
+    text: text,
+    date: new Date().toLocaleString()
+  });
+
+  localStorage.setItem("itemShopComments", JSON.stringify(comments));
+
+  commentName.value = "";
+  commentText.value = "";
+
+  loadComments();
+}
+
+function loadComments() {
+  const comments = JSON.parse(localStorage.getItem("itemShopComments")) || [];
+
+  commentList.innerHTML = "";
+
+  comments.forEach(comment => {
+    const div = document.createElement("div");
+    div.className = "comment";
+
+    div.innerHTML = `
+      <strong>${comment.name}</strong>
+      <p>${comment.text}</p>
+      <small>${comment.date}</small>
+    `;
+
+    commentList.appendChild(div);
+  });
+}
+</script>
+
+</body>
+</html>
